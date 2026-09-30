@@ -1,3 +1,9 @@
+A fun hackathon project that attempts to create a search-&-rescue algorithm using swarm intelligent meta-heuristics (PSO). 
+
+The dataset/world_seed is pre-fixed; Unlike the one in demonstration (which is what we aim to achieve).
+
+**Quick Summary of the Algorithm:**
+
 # OptiForge: Decentralized Drone Swarm for Search-and-Rescue
 
 An autonomous, fully decentralized multi-agent simulation of a drone swarm searching a disaster zone. The system handles drone crashes, communication blackouts, and secondary structural collapses in real time with zero centralized coordinator.
