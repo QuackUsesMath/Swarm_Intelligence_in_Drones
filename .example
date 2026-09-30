@@ -1,0 +1,8 @@
+# .example - Placeholder template configuration file
+#
+# NOTE: This file is provided as an example template for local user-defined configurations.
+# OptiForge supports full dynamic configuration via JSON files, terminal CLI flags,
+# or the interactive terminal wizard (python main.py --interactive).
+#
+# To generate a complete JSON configuration template from the live schema, run:
+#   python main.py --export-config my_custom_config.json

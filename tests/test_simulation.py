@@ -141,6 +141,42 @@ class TestSwarmSimulation(unittest.TestCase):
         self.assertIn(3, sim.drones[0].failed_neighbors)
         self.assertNotIn((20, 20), sim.drones[0].auction.claims)
 
+    def test_schedule_string_parsers(self):
+        """Verify parsing of dynamic schedule strings from CLI."""
+        from config import parse_failures, parse_dropouts, parse_collapses, parse_coord
+
+        self.assertEqual(parse_coord("12,34"), (12, 34))
+        self.assertEqual(parse_failures("30:2;60:4,5"), {30: [2], 60: [4, 5]})
+        self.assertEqual(parse_failures("none"), {})
+        self.assertEqual(parse_dropouts("50-75;100-120"), [(50, 75), (100, 120)])
+        self.assertEqual(parse_dropouts("none"), [])
+
+        collapses = parse_collapses("50:10,10;60:20,20,2")
+        self.assertEqual(collapses[50], [(10, 10)])
+        self.assertEqual(len(collapses[60]), 4)  # 2x2 cluster
+        self.assertIn((20, 20), collapses[60])
+        self.assertIn((21, 21), collapses[60])
+
+    def test_json_roundtrip_serialization(self):
+        """Verify JSON export and import fidelity."""
+        cfg_original = SwarmConfig(
+            grid_width=80,
+            grid_height=80,
+            num_drones=12,
+            failure_schedule={20: [1], 40: [3, 7]},
+            comm_dropouts=[(30, 50)],
+            dynamic_obstacles={45: [(10, 10), (11, 11)]}
+        )
+        json_str = cfg_original.to_json()
+        cfg_restored = SwarmConfig.from_json(json_str)
+
+        self.assertEqual(cfg_restored.grid_width, 80)
+        self.assertEqual(cfg_restored.grid_height, 80)
+        self.assertEqual(cfg_restored.num_drones, 12)
+        self.assertEqual(cfg_restored.failure_schedule, {20: [1], 40: [3, 7]})
+        self.assertEqual(cfg_restored.comm_dropouts, [(30, 50)])
+        self.assertEqual(cfg_restored.dynamic_obstacles, {45: [(10, 10), (11, 11)]})
+
 
 if __name__ == "__main__":
     unittest.main()

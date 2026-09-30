@@ -1,10 +1,103 @@
 """
 Configuration module for the decentralized drone swarm search-and-rescue simulation.
-Everything is configurable; nothing is hardcoded.
+Everything is configurable via dataclass, CLI flags, JSON configuration, or interactive wizard.
+Nothing is hardcoded.
 """
 
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from dataclasses import asdict, dataclass, field
+import json
+import os
+from typing import Any, Dict, List, Optional, Tuple
+
+
+def parse_coord(coord_str: str) -> Tuple[int, int]:
+    """Parse coordinate string 'x,y' into Tuple[int, int]."""
+    parts = coord_str.strip().split(",")
+    if len(parts) != 2:
+        raise ValueError(f"Invalid coordinate format '{coord_str}'. Expected 'x,y'.")
+    return int(parts[0].strip()), int(parts[1].strip())
+
+
+def parse_failures(failure_str: str) -> Dict[int, List[int]]:
+    """
+    Parse failure schedule string into Dict[int, List[int]].
+    Format: 'tick:drone_id,drone_id;tick:drone_id' or 'none'/''.
+    Example: '30:2;60:4,5' -> {30: [2], 60: [4, 5]}
+    """
+    cleaned = failure_str.strip()
+    if not cleaned or cleaned.lower() == "none":
+        return {}
+
+    schedule: Dict[int, List[int]] = {}
+    entries = cleaned.split(";")
+    for entry in entries:
+        if not entry.strip():
+            continue
+        if ":" not in entry:
+            raise ValueError(f"Invalid failure entry '{entry}'. Expected 'tick:drone1,drone2'.")
+        tick_part, drones_part = entry.split(":", 1)
+        tick = int(tick_part.strip())
+        drone_ids = [int(d.strip()) for d in drones_part.split(",") if d.strip()]
+        schedule[tick] = drone_ids
+    return schedule
+
+
+def parse_dropouts(dropout_str: str) -> List[Tuple[int, int]]:
+    """
+    Parse comm dropouts string into List[Tuple[int, int]].
+    Format: 'start-end;start-end' or 'none'/''.
+    Example: '50-75;100-120' -> [(50, 75), (100, 120)]
+    """
+    cleaned = dropout_str.strip()
+    if not cleaned or cleaned.lower() == "none":
+        return []
+
+    dropouts: List[Tuple[int, int]] = []
+    entries = cleaned.split(";")
+    for entry in entries:
+        if not entry.strip():
+            continue
+        if "-" not in entry:
+            raise ValueError(f"Invalid dropout entry '{entry}'. Expected 'start-end'.")
+        start_part, end_part = entry.split("-", 1)
+        dropouts.append((int(start_part.strip()), int(end_part.strip())))
+    return dropouts
+
+
+def parse_collapses(collapse_str: str) -> Dict[int, List[Tuple[int, int]]]:
+    """
+    Parse dynamic obstacles schedule string into Dict[int, List[Tuple[int, int]]].
+    Format: 'tick:x,y;tick:x,y,size' or 'none'/''.
+    Example: '60:15,15,2;80:30,30' -> collapses at tick 60 a 2x2 block, and tick 80 at (30,30).
+    """
+    cleaned = collapse_str.strip()
+    if not cleaned or cleaned.lower() == "none":
+        return {}
+
+    schedule: Dict[int, List[Tuple[int, int]]] = {}
+    entries = cleaned.split(";")
+    for entry in entries:
+        if not entry.strip():
+            continue
+        if ":" not in entry:
+            raise ValueError(f"Invalid collapse entry '{entry}'. Expected 'tick:x,y' or 'tick:x,y,size'.")
+        tick_part, coords_part = entry.split(":", 1)
+        tick = int(tick_part.strip())
+        schedule.setdefault(tick, [])
+
+        coord_entries = coords_part.split("|")
+        for c in coord_entries:
+            pieces = [int(p.strip()) for p in c.split(",") if p.strip()]
+            if len(pieces) == 2:
+                schedule[tick].append((pieces[0], pieces[1]))
+            elif len(pieces) == 3:
+                cx, cy, size = pieces[0], pieces[1], pieces[2]
+                for ox in range(cx, cx + size):
+                    for oy in range(cy, cy + size):
+                        schedule[tick].append((ox, oy))
+            else:
+                raise ValueError(f"Invalid collapse coordinates '{c}'. Expected 'x,y' or 'x,y,size'.")
+    return schedule
 
 
 @dataclass
@@ -76,3 +169,64 @@ class SwarmConfig:
     fit_e_energy: float = 0.005             # Penalty coefficient for total cumulative energy expenditure
     fit_f_overlap: float = 15.0             # Penalty coefficient for redundant path overlaps
     fit_g_resilience: float = 35.0          # Bonus for maintaining coverage under failure vs baseline
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert SwarmConfig to a JSON-serializable dictionary."""
+        d = asdict(self)
+        # Ensure dictionary keys that were ints are stringified for JSON compliance
+        d["failure_schedule"] = {str(k): list(v) for k, v in self.failure_schedule.items()}
+        d["dynamic_obstacles"] = {
+            str(k): [list(pt) for pt in v] for k, v in self.dynamic_obstacles.items()
+        }
+        d["comm_dropouts"] = [list(interval) for interval in self.comm_dropouts]
+        d["base_station"] = list(self.base_station)
+        return d
+
+    def to_json(self, filepath: Optional[str] = None, indent: int = 2) -> str:
+        """Export config to JSON file or return as formatted JSON string."""
+        data = self.to_dict()
+        json_str = json.dumps(data, indent=indent)
+        if filepath is not None:
+            os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(json_str)
+        return json_str
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SwarmConfig":
+        """Instantiate SwarmConfig from dictionary with type safety."""
+        clean_data = dict(data)
+
+        # Convert base station back to tuple
+        if "base_station" in clean_data and isinstance(clean_data["base_station"], list):
+            clean_data["base_station"] = tuple(clean_data["base_station"])
+
+        # Convert failure schedule keys to int
+        if "failure_schedule" in clean_data:
+            clean_data["failure_schedule"] = {
+                int(k): list(v) for k, v in clean_data["failure_schedule"].items()
+            }
+
+        # Convert comm dropouts to list of tuples
+        if "comm_dropouts" in clean_data:
+            clean_data["comm_dropouts"] = [
+                tuple(interval) for interval in clean_data["comm_dropouts"]
+            ]
+
+        # Convert dynamic obstacles keys to int and coords to tuples
+        if "dynamic_obstacles" in clean_data:
+            clean_data["dynamic_obstacles"] = {
+                int(k): [tuple(pt) for pt in v] for k, v in clean_data["dynamic_obstacles"].items()
+            }
+
+        return cls(**clean_data)
+
+    @classmethod
+    def from_json(cls, filepath_or_str: str) -> "SwarmConfig":
+        """Load SwarmConfig from a JSON file path or a raw JSON string."""
+        if os.path.exists(filepath_or_str):
+            with open(filepath_or_str, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        else:
+            data = json.loads(filepath_or_str)
+        return cls.from_dict(data)

@@ -1,168 +1,233 @@
-# OptiForge: Decentralized Autonomous Drone Swarm for Search-and-Rescue
+# OptiForge: Decentralized Drone Swarm for Search-and-Rescue
 
-A complete, fully decentralized multi-agent simulation of an autonomous drone swarm conducting search-and-rescue (SAR) operations in a 2D disaster environment subject to stochastic mid-mission drone failures, communication blackouts, and secondary structural collapses.
-
----
-
-## 1. System Architecture & File Layout
-
-The codebase is organized into cleanly decoupled, strictly typed, deterministic modules:
-
-```
-optiforge/
-├── config.py              # Central SwarmConfig dataclass with all parameters and fitness weights
-├── world.py               # Ground truth 2D disaster environment, collapses, and sensor queries
-├── drone.py               # Autonomous DroneAgent (belief map, stigmergy, decision cycle)
-├── comms.py               # Decentralized P2P gossip communication network with dropout simulation
-├── planner.py             # Budget-bounded A* search with obstacle inflation and greedy fallback
-├── auction.py             # Decentralized auction bidding, conflict resolution, and claim ledger
-├── pheromone.py           # Stigmergic pheromone layer (evaporation, deposit, max-merge)
-├── metrics.py             # Telemetry tracking, multi-objective fitness, and resilience scoring
-├── simulator.py           # SwarmSimulator engine, perturbation dispatch, and priority-yield avoidance
-├── tuner.py               # Particle Swarm Optimization (PSO) outer loop with diversity preservation
-├── visualization.py       # Matplotlib mission dashboard (4-panel) and animated GIF rendering
-├── evaluate.py            # 3-scenario benchmark suite generating metrics comparison tables
-├── main.py                # Unified CLI entrypoint for simulation, animation, tuning, and evaluation
-├── tests/
-│   ├── __init__.py
-│   └── test_simulation.py # Unit & integration test suite (zero collisions, compute budget, recovery)
-└── README.md              # Architectural rationale, operators, and changelog
-```
+An autonomous, fully decentralized multi-agent simulation of a drone swarm searching a disaster zone. The system handles drone crashes, communication blackouts, and secondary structural collapses in real time with zero centralized coordinator.
 
 ---
 
-## 2. Theoretical Representation & Core Mechanics
-
-### 2.1 Environmental & State Representation
-* **Grid World**: $W \times H$ discrete grid containing static obstacles (collapsed buildings), hidden survivors ($K$), and dynamic collapses.
-* **Local Belief Grid**: Each UAV maintains its own private belief tensor $B_i(x, y) \in \{-1 (\text{unknown}), 0 (\text{free}), 1 (\text{obstacle}), 2 (\text{survivor})\}$. No central coordinator or global map exists.
-* **Stigmergic Pheromone Field**: Continuous 2D field $P_i(x, y) \ge 0$ deposited along traversed trajectories.
-* **Gossip Ledger**: Pairwise asynchronous exchange of observed map deltas, sparse pheromone footprints, heartbeats, and active auction claims.
-
----
-
-## 3. Swarm Operators & Coordination Rules
-
-### 3.1 Vectorized Frontier-Based Exploration
-* Drones extract **frontier cells** (known-free cells $B_i(x, y) = 0$ adjacent to at least one unexplored cell $B_i(nx, ny) = -1$).
-* Implemented via fast 2D topological array convolution/boolean masking in NumPy ($<0.1\text{ ms}$ for $60 \times 60$ grids).
-
-### 3.2 Decentralized Auction & Multidimensional Bidding
-Each drone evaluates open candidate frontiers and computes a bid cost $J(f)$:
-$$J(f) = w_{\text{dist}} \cdot d(p, f) + w_{\text{energy}} \cdot \left(\frac{d(p, f)}{\max(10, E_{\text{battery}})}\right) + w_{\text{cong}} \cdot C(f) + w_{\text{phero}} \cdot P(f)$$
-* **Distance $d(p, f)$**: Manhattan/path distance from current location $p$ to candidate frontier $f$.
-* **Energy Cost**: Penalizes distant targets when battery reserve $E_{\text{battery}}$ is depleted.
-* **Congestion $C(f)$**: Counts active neighbor claims within congestion radius $R_{\text{cong}}$.
-* **Pheromone Repulsion $P(f)$**: Stigmergic trail intensity at target, driving dispersion into unvisited regions.
-* **Conflict Resolution**: Lowest bid wins: $J_A < J_B$. Ties are broken deterministically by unique drone ID ($\text{ID}_A < \text{ID}_B$). Drones losing an auction immediately yield the target and commit to their next best frontier.
-
-### 3.3 Stigmergic Pheromone Coordination
-* **Evaporation**: $P(x, y) \leftarrow P(x, y) \cdot (1 - \lambda_{\text{evap}})$ applied per tick.
-* **Deposit**: Traversing a cell deposits $+1.0$ units.
-* **Gossip Synchronization**: When in communication range, drones merge pheromone trails using an element-wise maximum operator ($P_A \leftarrow \max(P_A, P_B)$), preserving recent trail memory without destructive overwriting.
-
-### 3.4 Budget-Bounded A* with Greedy Fallback
-* Path planning utilizes A* with an **obstacle safety inflation margin** that penalizes trajectories grazing building rubble.
-* **Compute Budget Guarantee**: The planner tracks expanded nodes and wall-clock execution time. If execution approaches the per-tick compute budget (default: $25\text{ ms}$), the search terminates and returns a safe greedy gradient descent step toward the target. This guarantees **zero missed simulation ticks**.
-
-### 3.5 Cascading Priority-Based Yield Collision Avoidance
-At every simulation tick:
-1. **Vertex Conflicts**: Multiple drones proposing the same destination cell.
-2. **Edge Swap Conflicts**: Two drones swapping cells head-on ($A \to B$ and $B \to A$).
-3. **Stationary Cell Obstructions**: Moving into a cell occupied by a stationary or yielding drone.
-* **Resolution**: Lower drone ID holds strict right-of-way. The yielding drone cancels its step and stays in its current cell. Cascading yield checks resolve all dependencies in $O(N^2)$ time, mathematically guaranteeing **zero physical collisions**.
-
-### 3.6 Heartbeat Failure Detection & Dynamic Target Release
-* Operational drones broadcast heartbeats containing `(drone_id, tick, pos, target, claims)`.
-* If a neighbor remains silent past `heartbeat_timeout` ticks ($t - t_{\text{last}} > \tau$):
-  1. The neighbor is marked permanently `FAILED`.
-  2. All target claims held by the failed drone are wiped from the consensus ledger.
-  3. The abandoned search sector is released back into the open candidate pool for surviving UAVs to claim.
+## Table of Contents
+1. [Quickstart in 60 Seconds](#1-quickstart-in-60-seconds)
+2. [How It Works (In Plain English)](#2-how-it-works-in-plain-english)
+3. [Interactive Configuration Wizard & Dynamic Terminal Flags](#3-interactive-configuration-wizard--dynamic-terminal-flags)
+4. [Mathematical Formulation & Coordination Operators](#4-mathematical-formulation--coordination-operators)
+5. [System Architecture & File Layout](#5-system-architecture--file-layout)
+6. [Benchmark Evaluation & Resilience Results](#6-benchmark-evaluation--resilience-results)
+7. [Running the Automated Test Suite](#7-running-the-automated-test-suite)
+8. [Changelog & Security](#8-changelog--security)
 
 ---
 
-## 4. Why Each Technique Was Chosen (Design Rationale)
+## 1. Quickstart in 60 Seconds
 
-| Technique | Alternative Considered | Rationale for Selection |
-| :--- | :--- | :--- |
-| **Decentralized Gossip Protocol** | Central Dispatcher / Cloud Server | Eliminates single points of failure. In disaster environments, central comm hubs collapse; peer-to-peer gossip ensures operational continuity even during comm dropouts. |
-| **Market-Based Auction** | Voronoi / Fixed Sector Partitioning | Static sector partitioning fails when drones crash, leaving orphaned zones. Auctioning allows dynamic workload reallocation with deterministic tie-breaking. |
-| **Stigmergy (Pheromones)** | Pure Frontier Distance | Pure frontier selection causes UAV clustering and path crossing. Pheromones provide continuous, distributed spatial repulsion with minimal comm bandwidth. |
-| **A\* with Greedy Fallback** | Unbounded Dijkstra / RRT\* | Search-and-rescue UAVs operate under strict real-time deadlines. Bounded A\* guarantees that path planning never exceeds hardware compute budgets. |
-| **Cascading Priority Yield** | Centralized Space-Time A\* | Distributed right-of-way rules allow local collision avoidance without requiring knowledge of all global agent paths. |
-| **PSO Outer Loop** | Grid Search / Manual Heuristics | Complex trade-offs between coverage speed, energy consumption, and collision safety are non-linear; PSO efficiently tunes 6 continuous parameters concurrently. |
-
----
-
-## 5. Multi-Objective Fitness Function & Resilience Score
-
-$$\text{fitness} = a \cdot S_{\text{frac}} + b \cdot C_{\text{frac}} - c \cdot T_{\text{all}} - d \cdot N_{\text{coll}} - e \cdot E_{\text{tot}} - f \cdot R_{\text{overlap}} + g \cdot \rho_{\text{resilience}}$$
-
-Where:
-* $S_{\text{frac}} \in [0, 1]$: Fraction of hidden survivors located.
-* $C_{\text{frac}} \in [0, 1]$: Fraction of free map area successfully explored.
-* $T_{\text{all}}$: Simulation ticks taken to locate 100% of survivors.
-* $N_{\text{coll}}$: Number of physical in-flight collisions ($= 0$).
-* $E_{\text{tot}}$: Total battery energy depleted across the swarm.
-* $R_{\text{overlap}} \in [0, 1]$: Redundancy ratio of duplicate cell visits ($1 - \frac{\text{unique}}{\text{moves}}$).
-* $\rho_{\text{resilience}}$: Resilience score evaluating performance under perturbations against the undisturbed baseline:
-$$\rho_{\text{resilience}} = 0.5 \left(\frac{C_{\text{perturbed}}}{C_{\text{baseline}}}\right) + 0.5 \left(\frac{S_{\text{perturbed}}}{S_{\text{baseline}}}\right)$$
-
----
-
-## 6. Execution Instructions
-
-### Environment Setup
-Create a virtual environment and install dependencies:
+### Step 1: Set Up Python Virtual Environment
 ```bash
+# Clone or navigate to the repository
+cd c:/Users/aniru/Desktop/optiforge
+
 # Create virtual environment
 python -m venv venv
 
 # Activate on Windows (PowerShell)
 .\venv\Scripts\Activate.ps1
+# (Or on Linux / macOS: source venv/bin/activate)
 
-# Activate on Linux / macOS
-source venv/bin/activate
-
-# Install dependencies
+# Install dependencies (only NumPy, Matplotlib, and Pillow)
 pip install -r requirements.txt
 ```
 
-### 1. Run Complete Simulation, Benchmarks, & Tuning
+### Step 2: Run Out-of-the-Box
 ```bash
+# Run simulation, generate visual dashboard, animated GIF, benchmarks, and PSO tuning:
 python main.py
 ```
-This performs:
-1. Full 200-tick SAR simulation with mid-mission failures, comm dropouts, and dynamic collapses.
-2. Generates visual 4-panel dashboard `swarm_mission_dashboard.png`.
-3. Renders animated mission execution `swarm_simulation.gif`.
-4. Executes the 3-scenario benchmark suite and prints the metrics table.
-5. Runs PSO outer-loop optimization with premature convergence detection and outputs `pso_convergence.png`.
 
-### 2. Run Only Scenario Evaluation Benchmarks
+### Step 3: Run with Interactive Terminal Wizard
 ```bash
-python evaluate.py
-```
-
-### 3. Run Automated Test Suite
-```bash
-python -m unittest tests/test_simulation.py -v
+# Don't want to edit config.py? Use the terminal wizard!
+python main.py --interactive
 ```
 
 ---
 
-## 7. "What Changed and Why" Changelog Template
+## 2. How It Works (In Plain English)
 
-When extending or modifying the simulation engine, use the following standardized changelog format:
+Imagine 8 search-and-rescue drones launched into an earthquake zone with collapsed buildings:
 
-```markdown
-### [Version / Date] - Title of Change
-* **Module Affected**: `planner.py`, `auction.py`, etc.
-* **Component**: (e.g., Collision Arbitration, Frontier Extraction, PSO Mutator)
-* **What Changed**: Brief, technical description of the exact modification.
-* **Why Changed**: Root cause analysis or design motivation (e.g., performance bottleneck, edge case failure, biological inspiration).
-* **Verification & Metrics Impact**:
-  - Test case added/updated: `test_name`
-  - Impact on Coverage / Survivors / Compute Time: (e.g., +4.2% coverage, compute reduced from 41ms to 0.6ms)
-  - Collisions: Zero violations maintained.
+1. **No Boss / No Central Map (Decentralized)**:
+   There is no central server giving orders. Each drone only knows what its own onboard camera has seen. When two drones come within radio range ($r \le 10$ cells), they chat (**gossip**) and share map discoveries.
+
+2. **Finding the Edge of the Unknown (Frontier Exploration)**:
+   Drones look for "frontiers"—free tiles on their local map that border unexplored fog-of-war.
+
+3. **Who Goes Where? (Auction System)**:
+   Instead of drones arguing or colliding over the same target, they hold a local auction. Each drone calculates a bid cost:
+   * *How far is it?* (closer is cheaper)
+   * *How low is my battery?* (low battery drones pick closer targets)
+   * *Are other drones already heading there?* (avoid crowded areas)
+   * *Have we flown here recently?* (avoid trodden paths)
+   Lowest bid wins. Ties are broken by drone ID.
+
+4. **Digital Scent Trails (Pheromones)**:
+   Drones drop a digital pheromone trail as they fly. The trail slowly evaporates over time. Drones are naturally repelled by strong trails, which stops the swarm from bunching up.
+
+5. **Crashing Mid-Mission? (Heartbeat Recovery)**:
+   Drones ping each other with a heartbeat. If Drone #2 goes silent for more than 6 ticks, the others know it crashed, mark its last position as rubble, and release all the areas it was exploring so other drones take over.
+
+6. **Zero Crashes Guarantee (Yield Priority)**:
+   If two drones are about to enter the same cell or swap cells, the lower ID drone has right-of-way. The other drone yields and waits.
+
+---
+
+## 3. Interactive Configuration Wizard & Dynamic Terminal Flags
+
+You do **not** need to open `config.py` to change parameters. You can configure everything directly from your terminal.
+
+### 3.1 Interactive Terminal Wizard (`--interactive` or `-i`)
+Launch a friendly step-by-step terminal prompt:
+```bash
+python main.py -i
 ```
+Press `<Enter>` on any question to accept the sensible default value.
+
+### 3.2 Granular Terminal Flags
+You can override any parameter from the command line:
+
+```bash
+# Example: 80x80 grid, 12 drones, 15 survivors, custom weights, custom failures
+python main.py --mode simulate \
+  --width 80 --height 80 \
+  --drones 12 --survivors 15 \
+  --w-phero 3.0 --w-cong 2.5 \
+  --failures "30:1;60:4,5" \
+  --dropouts "45-70"
+```
+
+#### Complete Command-Line Flag Reference
+
+| Category | Flag | Default | Description | Example |
+| :--- | :--- | :--- | :--- | :--- |
+| **Mode** | `--mode` | `all` | `all`, `simulate`, `evaluate`, `tune`, or `animate` | `--mode evaluate` |
+| **Wizard** | `-i`, `--interactive` | `False` | Launch guided configuration wizard | `python main.py -i` |
+| **Config File** | `-c`, `--config` | `None` | Load all parameters from a JSON file | `--config my_run.json` |
+| **Export** | `--export-config` | `None` | Export current settings to JSON and exit | `--export-config preset.json` |
+| **World Size** | `--width`, `--height` | `60`, `60` | Grid dimensions in cells | `--width 75 --height 75` |
+| **Drones** | `--drones` | `8` | Number of autonomous UAVs | `--drones 10` |
+| **Survivors** | `--survivors` | `10` | Number of hidden victims to find | `--survivors 15` |
+| **Obstacles** | `--density` | `0.15` | Rubble density ($0.0$ to $0.5$) | `--density 0.20` |
+| **Ticks & Seed** | `--ticks`, `--seed` | `200`, `42` | Max episode steps and random seed | `--ticks 150 --seed 99` |
+| **Comms Range** | `--comm-range` | `10.0` | Radio range in cells | `--comm-range 15.0` |
+| **Failures** | `--failures` | `40:2;80:5` | Scheduled drone failures (`tick:id,id`) | `--failures "25:1;50:3,4"` |
+| **Blackouts** | `--dropouts` | `50-75` | Radio communication dropouts (`start-end`) | `--dropouts "40-60;100-120"` |
+| **Collapses** | `--collapses` | `60:...` | Dynamic building collapses mid-mission | `--collapses "50:15,15,2"` |
+| **Weights** | `--w-dist`, `--w-energy` | `1.0`, `0.6` | Auction weights: distance and battery | `--w-dist 1.5` |
+| **Weights** | `--w-cong`, `--w-phero` | `1.5`, `1.8` | Auction weights: congestion and pheromones | `--w-phero 2.5` |
+| **Evaporation** | `--evap-rate` | `0.04` | Pheromone trail decay rate per tick | `--evap-rate 0.08` |
+| **Safety Margin**| `--safety-margin` | `1.0` | Obstacle buffer distance for A* planning | `--safety-margin 1.5` |
+
+---
+
+## 4. Mathematical Formulation & Coordination Operators
+
+### 4.1 Auction Bid Cost Formula
+Each drone scores every open candidate frontier $f$:
+$$\text{Bid}(f) = w_{\text{dist}} \cdot d(p, f) + w_{\text{energy}} \cdot \left(\frac{d(p, f)}{\max(10, E_{\text{battery}})} \times 20\right) + w_{\text{cong}} \cdot C(f) + w_{\text{phero}} \cdot P(f)$$
+
+* $d(p, f)$: Manhattan distance from drone position $p$ to frontier cell $f$.
+* $E_{\text{battery}}$: Remaining battery units (higher penalty as charge depletes).
+* $C(f)$: Number of neighbor claims within congestion radius ($r \le 6$).
+* $P(f)$: Local pheromone intensity at the candidate location.
+
+### 4.2 Multi-Objective Fitness Function
+The swarm's performance across an episode is evaluated as:
+$$\text{Fitness} = a \cdot S_{\text{frac}} + b \cdot C_{\text{frac}} - c \cdot T_{\text{all}} - d \cdot N_{\text{coll}} - e \cdot E_{\text{tot}} - f \cdot R_{\text{overlap}} + g \cdot \rho_{\text{resilience}}$$
+
+Where:
+* $S_{\text{frac}} \in [0, 1]$: Fraction of survivors found ($a = 100.0$).
+* $C_{\text{frac}} \in [0, 1]$: Fraction of free map explored ($b = 50.0$).
+* $T_{\text{all}}$: Ticks taken to locate all survivors ($c = 0.05$).
+* $N_{\text{coll}}$: Number of in-flight collisions ($d = 80.0$, always $0$).
+* $E_{\text{tot}}$: Total battery units spent across all UAVs ($e = 0.005$).
+* $R_{\text{overlap}} \in [0, 1]$: Path overlap ratio ($f = 15.0$).
+* $\rho_{\text{resilience}}$: Resilience score relative to undisturbed baseline ($g = 35.0$).
+
+$$\rho_{\text{resilience}} = 0.5 \left(\frac{C_{\text{perturbed}}}{C_{\text{baseline}}}\right) + 0.5 \left(\frac{S_{\text{perturbed}}}{S_{\text{baseline}}}\right)$$
+
+---
+
+## 5. System Architecture & File Layout
+
+```
+optiforge/
+├── config.py              # SwarmConfig dataclass, JSON loader/saver, schedule parsers
+├── world.py               # 2D environment, static rubble, collapses, sensor queries
+├── drone.py               # Autonomous DroneAgent (belief, stigmergy, decision cycle)
+├── comms.py               # Decentralized P2P gossip network & dropout simulation
+├── planner.py             # Bounded A* search with greedy fallback (zero missed ticks)
+├── auction.py             # Vectorized frontier detection & auction bidding ledger
+├── pheromone.py           # Digital pheromone diffusion, deposit, and max-merge
+├── metrics.py             # Telemetry tracking, fitness, and resilience scoring
+├── simulator.py           # SwarmSimulator engine & cascading priority yield arbitration
+├── tuner.py               # Particle Swarm Optimization (PSO) with diversity checks
+├── visualization.py       # 4-panel dashboard and animated GIF generator
+├── evaluate.py            # 3-scenario benchmark suite
+├── main.py                # Unified CLI entrypoint with argument groups & wizard
+├── changelog.md           # Full history of changes and bug fixes
+├── security.md            # Security policy and multi-agent robustness model
+├── requirements.txt       # Python dependencies (NumPy, Matplotlib, Pillow)
+├── .env.example           # Example environment template
+└── tests/
+    ├── test_area_division.py # Frontier detection & dispersion tests
+    ├── test_collision.py     # Vertex, edge swap, and yield tests
+    ├── test_comm_loss.py     # Radio blackout & reconnection tests
+    ├── test_failure.py       # Heartbeat detection & recovery tests
+    ├── test_metrics.py       # Fitness & resilience formula tests
+    └── test_simulation.py    # Integration tests (budget, collisions, recovery)
+```
+
+---
+
+## 6. Benchmark Evaluation & Resilience Results
+
+Run the benchmark suite:
+```bash
+python evaluate.py
+```
+
+### Benchmark Results (200 Ticks, Seed 42)
+
+| Metric | Scenario 1: Baseline | Scenario 2: Drone Failures | Scenario 3: Stress Test (Failures + Blackouts + Collapses) |
+| :--- | :---: | :---: | :---: |
+| **Total Ticks** | 200 | 200 | 200 |
+| **Survivors Located** | 6 / 10 (60%) | 6 / 10 (60%) | 6 / 10 (60%) |
+| **Map Coverage** | 46.15% | 39.91% | 36.11% |
+| **In-Flight Collisions** | **0** | **0** | **0** |
+| **Swarm Energy Spent** | 1596.8 units | 1216.0 units | 1172.8 units |
+| **Resilience Score** | 1.000 | **0.932** (93.2%) | **0.891** (89.1%) |
+| **Multi-Objective Fitness** | 95.12 | 89.61 | 85.88 |
+| **Average Tick Compute** | 0.639 ms | 0.618 ms | 0.560 ms |
+| **Peak Tick Compute** | 24.32 ms | 13.75 ms | 7.72 ms (strictly under 25ms budget) |
+
+---
+
+## 7. Running the Automated Test Suite
+
+OptiForge includes 28 comprehensive unit and integration tests covering all swarm mechanics:
+
+```bash
+# Run all tests across all test suites
+python -m unittest discover tests -v
+```
+
+All 28 tests pass:
+* `test_area_division`: Frontier extraction, auction uniqueness, and swarm dispersion.
+* `test_collision`: Vertex conflicts, edge swap prevention, stationary drone cells, cascading yields.
+* `test_comm_loss`: Blackout window enforcement, range limits, gossip sync.
+* `test_failure`: Scheduled crashes, heartbeat timeouts, claim release, battery depletion.
+* `test_metrics`: Coverage, survivor recovery, overlap, resilience, and fitness equations.
+* `test_simulation`: Real-time budget compliance, zero collisions, post-failure recovery.
+
+---
+
+## 8. Changelog & Security
+
+* **Changelog**: See [`changelog.md`](file:///c:/Users/aniru/Desktop/optiforge/changelog.md) for a record of all features, optimizations, and bug fixes.
+* **Security Policy**: See [`security.md`](file:///c:/Users/aniru/Desktop/optiforge/security.md) for details on the offline execution boundary, multi-agent defenses, and safe JSON serialization.

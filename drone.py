@@ -198,8 +198,9 @@ class DroneAgent:
                 if nid not in self.failed_neighbors:
                     newly_failed.add(nid)
                     self.failed_neighbors.add(nid)
-                    if nid in self.known_neighbor_positions:
-                        del self.known_neighbor_positions[nid]
+                    last_pos = self.known_neighbor_positions.pop(nid, None)
+                    if last_pos is not None:
+                        self.known_obstacles.add(last_pos)
                     if nid in self.known_neighbor_targets:
                         del self.known_neighbor_targets[nid]
 
