@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OptiForge Swarm Lab</title>
+<style>
+:root{--bg:#f3f6f9;--card:#fff;--ink:#0f1a24;--mut:#5b6b7a;--line:#d8e0e7;--acc:#0a8fb5;--ok:#1f9d6b;--bad:#d64545;--free:#eef1f4;--obs:#232a36;--fog:#9aa8b6;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0b1118;--card:#121b26;--ink:#e6edf3;--mut:#8b9bab;--line:#233142;--acc:#38d0f0;--ok:#3ddc97;--bad:#ff6b6b;--free:#25364a;--obs:#04070b;--fog:#0d141d}}
+:root[data-theme="dark"]{--bg:#0b1118;--card:#121b26;--ink:#e6edf3;--mut:#8b9bab;--line:#233142;--acc:#38d0f0;--ok:#3ddc97;--bad:#ff6b6b;--free:#25364a;--obs:#04070b;--fog:#0d141d}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+header{padding:16px 20px 4px}h1{margin:0;font-size:1.35rem}header p{margin:2px 0 0;color:var(--mut);font-size:.9rem}header a{color:var(--acc)}
+.grid{display:grid;grid-template-columns:minmax(0,640px) minmax(300px,1fr);gap:16px;padding:12px 20px 24px;max-width:1150px;margin:auto}
+@media(max-width:860px){.grid{grid-template-columns:1fr;padding:10px 12px}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
+canvas{width:100%;aspect-ratio:1;display:block;border-radius:8px;cursor:crosshair;background:var(--fog)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:.78rem;color:var(--mut)}.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+#banner{padding:9px 12px;border-radius:8px;background:color-mix(in srgb,var(--acc) 14%,transparent);font-weight:600;margin-bottom:10px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}@media(max-width:480px){.stats{grid-template-columns:repeat(2,1fr)}}
+.stat{border:1px solid var(--line);border-radius:8px;padding:6px 8px}.stat small{color:var(--mut);display:block;font-size:.7rem}.stat b{font-size:1.1rem}
+.row{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:7px 12px;border-radius:8px;cursor:pointer}
+button.p{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:600}button:hover{filter:brightness(1.08)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+label{display:flex;align-items:center;gap:8px;font-size:.85rem;margin:5px 0}label span{min-width:118px;color:var(--mut)}
+input[type=range]{flex:1;accent-color:var(--acc)}input[type=number],select{font:inherit;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:4px 6px}
+.chk{display:inline-flex;margin:3px 12px 3px 0}.chk span{min-width:0;color:var(--ink)}
+h3{margin:12px 0 4px;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;color:var(--mut)}
+#log{list-style:none;margin:0;padding:0;max-height:170px;overflow:auto;font-size:.8rem;font-family:ui-monospace,Menlo,monospace}#log li{padding:2px 0;border-bottom:1px dashed var(--line)}
+details{font-size:.85rem;color:var(--mut);margin-top:8px}summary{cursor:pointer;color:var(--ink)}
+</style></head><body>
+<header><h1>🛸 OptiForge Swarm Lab</h1><p>Decentralized drone swarm searching a disaster zone. Watch it adapt, then break things. <a href="replay.html">Python engine replay →</a></p></header>
+<div class="grid">
+<section class="card"><canvas id="cv" width="600" height="600" aria-label="Swarm simulation map"></canvas>
+<div class="legend"><span><i style="background:#ffaa00"></i>Pheromone trail</span><span><i style="background:var(--ok)"></i>Survivor found</span><span><i style="background:var(--bad)"></i>Hidden survivor (truth view)</span><span>💡 Click a drone to make it fail</span></div></section>
+<aside class="card">
+<div id="banner">Ready</div>
+<div class="stats" id="stats"></div>
+<div class="row"><button class="p" id="play">⏸ Pause</button><button id="stepb">Step</button><button id="reset">↺ Restart</button></div>
+<h3>Break things</h3>
+<div class="row"><button id="bk">💥 Fail a UAV</button><button id="bb">📡 Comm blackout</button><button id="bc">🏚 Building collapse</button></div>
+<label class="chk"><input type="checkbox" id="fail" checked><span>Scheduled failures</span></label><label class="chk"><input type="checkbox" id="black" checked><span>Scheduled blackout</span></label><label class="chk"><input type="checkbox" id="coll" checked><span>Scheduled collapses</span></label>
+<h3>Scenario</h3>
+<label><span>Drones <b id="vn"></b></span><input type="range" id="n" min="3" max="16" value="8"></label>
+<label><span>Survivors <b id="vk"></b></span><input type="range" id="k" min="3" max="20" value="10"></label>
+<label><span>Map seed</span><input type="number" id="seed" value="7" style="width:80px"><button id="dice" title="Random map">🎲</button></label>
+<label><span>Speed <b id="vs"></b></span><input type="range" id="speed" min="1" max="40" value="12"></label>
+<label><span>Spread out (congestion)</span><input type="range" id="wc" min="0" max="20" value="8"></label>
+<label><span>Avoid old trails</span><input type="range" id="wp" min="0" max="20" value="6"></label>
+<h3>View</h3>
+<label><span>Map shows</span><select id="view"></select></label>
+<label class="chk"><input type="checkbox" id="oph" checked><span>Pheromones</span></label><label class="chk"><input type="checkbox" id="olk" checked><span>Comm links</span></label><label class="chk"><input type="checkbox" id="opa" checked><span>Planned paths</span></label>
+<h3>Event log</h3><ul id="log"></ul>
+<details><summary>How the swarm works</summary><p>No central controller. Each drone keeps its own private map, sharing it by gossip with neighbours in radio range. It bids on frontier cells (cost = distance, battery, crowding, old trails), plans with budget-limited A*, and yields by ID priority to avoid collisions. Missing heartbeats mark a peer failed and free its claimed targets. Modelled after the OptiForge repo README.</p></details>
+</aside></div>
+<script>
+const $=i=>document.getElementById(i),W=60,N=W*W,SR=3,CR=12,TMAX=360,TO=40,C=10,D=[[1,0],[-1,0],[0,1],[0,-1]];
+let P={n:8,k:10,seed:7,speed:12,wc:8,wp:6},S,run=true,acc=0,lastT=-1;
+const cv=$('cv'),cx=cv.getContext('2d');
+function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function push(H,e){H.push(e);let i=H.length-1;while(i>0){const p=(i-1)>>1;if(H[p][0]<=H[i][0])break;[H[p],H[i]]=[H[i],H[p]];i=p}}
+function pop(H){const t=H[0],l=H.pop();if(H.length){H[0]=l;let i=0;for(;;){const a=2*i+1,b=a+1;let m=i;if(a<H.length&&H[a][0]<H[m][0])m=a;if(b<H.length&&H[b][0]<H[m][0])m=b;if(m===i)break;[H[m],H[i]]=[H[i],H[m]];i=m}}return t}
+function log(m){S.log.unshift(`[t${S.tick}] ${m}`);S.log.length=Math.min(S.log.length,40)}
+function init(){
+ const r=rng(P.seed),w=new Uint8Array(N);let c=0;
+ for(let t=0;c<N*.16&&t<3000;t++){const bw=1+r()*5|0,bh=1+r()*4|0,x=r()*(W-bw)|0,y=r()*(W-bh)|0;if(x<7&&y<7)continue;for(let j=y;j<y+bh;j++)for(let i=x;i<x+bw;i++)if(!w[j*W+i]){w[j*W+i]=1;c++}}
+ const dist=new Int16Array(N).fill(-1),q=[0];dist[0]=0;
+ for(let h=0;h<q.length;h++){const u=q[h],x=u%W,y=u/W|0;for(const[dx,dy]of D){const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=W||ny>=W)continue;const v=ny*W+nx;if(!w[v]&&dist[v]<0){dist[v]=dist[u]+1;q.push(v)}}}
+ const far=q.filter(v=>dist[v]>15),surv=[];
+ while(surv.length<Math.min(P.k,far.length)){const v=far[r()*far.length|0];if(!surv.includes(v))surv.push(v)}
+ S={w,surv,sset:new Set(surv),found:new Map(),tick:0,reach:q.length,coll:0,moves:0,vis:new Set(),energy:0,black:0,yields:0,done:false,log:[],r,cov:0,
+  drones:q.slice(0,P.n).map((v,id)=>({id,x:v%W,y:v/W|0,alive:true,bat:400,belief:new Int8Array(N).fill(-1),pher:new Float32Array(N),heard:new Int32Array(P.n),fail:new Set(),claims:{},tgt:-1,path:[],stuck:0,bad:{}})),union:new Int8Array(N).fill(-1)};
+ log('Mission start: '+S.drones.length+' UAVs, '+surv.length+' hidden survivors');
+ const v=$('view'),cur=v.value;v.innerHTML='<option value="swarm">Swarm knowledge</option><option value="truth">Ground truth</option>'+S.drones.map(d=>`<option value="${d.id}">UAV ${d.id} private map</option>`).join('');v.value=[...v.options].some(o=>o.value===cur)?cur:'swarm';
+ lastT=-1;acc=0;
+}
+function sense(d){
+ for(let dy=-SR;dy<=SR;dy++)for(let dx=-SR;dx<=SR;dx++){const x=d.x+dx,y=d.y+dy;if(x<0||y<0||x>=W||y>=W)continue;const c=y*W+x;let b=S.w[c]?1:0;
+  if(S.sset.has(c)){b=2;if(!S.found.has(c)){S.found.set(c,S.tick);log(`UAV ${d.id} found survivor #${S.found.size} at (${x},${y})`)}}d.belief[c]=b}
+}
+function gossip(A){
+ for(let i=0;i<A.length;i++)for(let j=i+1;j<A.length;j++){const a=A[i],b=A[j];if(Math.abs(a.x-b.x)+Math.abs(a.y-b.y)>CR)continue;
+  for(let c=0;c<N;c++){const m=Math.max(a.belief[c],b.belief[c]);a.belief[c]=b.belief[c]=m;const p=Math.max(a.pher[c],b.pher[c]);a.pher[c]=b.pher[c]=p}
+  for(let k=0;k<P.n;k++){const h=Math.max(a.heard[k],b.heard[k]);a.heard[k]=b.heard[k]=h}
+  a.claims[b.id]=b.tgt;b.claims[a.id]=a.tgt}
+}
+function detect(d){
+ if(S.tick<=TO)return;
+ for(let j=0;j<P.n;j++){if(j===d.id)continue;const silent=S.tick-d.heard[j]>TO;
+  if(silent&&!d.fail.has(j)){d.fail.add(j);delete d.claims[j];if(!S.drones[j].alive&&!S.det?.has(j)){(S.det??=new Set).add(j);log(`Swarm detected UAV ${j} is down, its search sector released`)}}
+  else if(!silent&&d.fail.has(j))d.fail.delete(j)}
+}
+function isFr(d,c){const b=d.belief[c];if(b!==0&&b!==2)return false;const x=c%W,y=c/W|0;return(x>0&&d.belief[c-1]<0)||(x<W-1&&d.belief[c+1]<0)||(y>0&&d.belief[c-W]<0)||(y<W-1&&d.belief[c+W]<0)}
+function near(d,v){const x=v%W,y=v/W|0;return(x>0&&d.belief[v-1]===1)||(x<W-1&&d.belief[v+1]===1)||(y>0&&d.belief[v-W]===1)||(y<W-1&&d.belief[v+W]===1)}
+function astar(d,s,g){
+ const gs=new Float32Array(N).fill(1e9),par=new Int32Array(N).fill(-1),cl=new Uint8Array(N),gx=g%W,gy=g/W|0,h=c=>Math.abs(c%W-gx)+Math.abs((c/W|0)-gy),H=[[h(s),s]];gs[s]=0;let ex=0;
+ while(H.length&&ex<3000){const u=pop(H)[1];if(cl[u])continue;cl[u]=1;ex++;
+  if(u===g){const p=[];for(let v=u;v!==s;v=par[v])p.push(v);return p.reverse()}
+  const x=u%W,y=u/W|0;
+  for(const[dx,dy]of D){const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=W||ny>=W)continue;const v=ny*W+nx,b=d.belief[v];if(b!==0&&b!==2)continue;const ng=gs[u]+1+(near(d,v)?.6:0);if(ng<gs[v]){gs[v]=ng;par[v]=u;push(H,[ng+h(v),v])}}}
+ if(ex>=3000){let best=-1,bh=1e9;const x=s%W,y=s/W|0;for(const[dx,dy]of D){const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=W||ny>=W)continue;const v=ny*W+nx;if((d.belief[v]===0||d.belief[v]===2)&&h(v)<bh){bh=h(v);best=v}}return best>=0?[best]:null}
+ return null;
+}
+function decide(d){
+ const pos=d.y*W+d.x;
+ if(d.tgt>=0&&(pos===d.tgt||!isFr(d,d.tgt))){d.tgt=-1;d.path=[]}
+ if(d.tgt>=0&&d.path.length||d.bat<=0)return;
+ d.tgt=-1;d.path=[];const cand=[],cl=Object.values(d.claims).filter(v=>v>=0),gx=d.x,gy=d.y;
+ for(let c=0;c<N;c++){if(c===pos||!isFr(d,c)||d.bad[c]>S.tick||cl.includes(c))continue;
+  const x=c%W,y=c/W|0,dist=Math.abs(x-gx)+Math.abs(y-gy);let cong=0;for(const q of cl)if(Math.abs(q%W-x)+Math.abs((q/W|0)-y)<7)cong++;
+  cand.push([dist*(1+40/Math.max(10,d.bat))+cong*P.wc+d.pher[c]*P.wp,c])}
+ cand.sort((a,b)=>a[0]-b[0]);
+ for(let i=0;i<Math.min(4,cand.length);i++){const p=astar(d,pos,cand[i][1]);if(p&&p.length){d.tgt=cand[i][1];d.path=p;return}d.bad[cand[i][1]]=S.tick+25}
+}
+function move(A){
+ const occ=new Set(A.map(d=>d.y*W+d.x));
+ for(const d of A){if(!d.path.length||d.bat<=0)continue;const nx=d.path[0],old=d.y*W+d.x;
+  if(S.w[nx]||d.belief[nx]===1){d.belief[nx]=1;d.path=[];d.tgt=-1;continue}
+  if(occ.has(nx)){S.yields++;if(++d.stuck>3){d.path=[];d.tgt=-1;d.stuck=0}continue}
+  d.stuck=0;occ.delete(old);occ.add(nx);d.x=nx%W;d.y=nx/W|0;d.path.shift();d.bat--;S.energy++;S.moves++;S.vis.add(nx);d.pher[nx]+=1}
+ if(new Set(A.map(d=>d.y*W+d.x)).size<A.length)S.coll++;
+}
+function killOne(d){if(!d||!d.alive)return;d.alive=false;d.tgt=-1;d.path=[];log(`💥 UAV ${d.id} failed at (${d.x},${d.y})`)}
+function killRandom(){const A=S.drones.filter(d=>d.alive);if(A.length>1)killOne(A[S.r()*A.length|0])}
+function collapse(){for(let t=0;t<30;t++){const x=1+S.r()*(W-4)|0,y=8+S.r()*(W-11)|0;let ok=true;
+  for(let j=y;j<y+3;j++)for(let i=x;i<x+3;i++){const c=j*W+i;if(S.sset.has(c)||S.drones.some(d=>d.alive&&Math.abs(d.x-i)<2&&Math.abs(d.y-j)<2))ok=false}
+  if(ok){for(let j=y;j<y+3;j++)for(let i=x;i<x+3;i++)S.w[j*W+i]=1;log(`🏚 Secondary collapse at (${x},${y})`);return}}}
+function blackout(){S.black=30;log('📡 Comm blackout: 30 ticks, no gossip')}
+function schedule(t){
+ if($('fail').checked&&[60,130,200].includes(t))killRandom();
+ if($('black').checked&&t===95)blackout();
+ if($('coll').checked&&[150,230].includes(t))collapse();
+}
+function step(){
+ if(S.done)return;S.tick++;schedule(S.tick);if(S.black>0)S.black--;
+ const A=S.drones.filter(d=>d.alive);A.forEach(sense);if(!S.black)gossip(A);
+ A.forEach(d=>{d.heard[d.id]=S.tick;if(!S.black)A.forEach(o=>{if(o!==d&&Math.abs(o.x-d.x)+Math.abs(o.y-d.y)<=CR)d.heard[o.id]=S.tick});detect(d)});
+ A.forEach(decide);move(A);A.forEach(d=>{for(let c=0;c<N;c++)d.pher[c]*=.985});
+ S.union.fill(-1);let cov=0;for(const d of S.drones)for(let c=0;c<N;c++)if(d.belief[c]>S.union[c])S.union[c]=d.belief[c];
+ for(let c=0;c<N;c++)if(S.union[c]===0||S.union[c]===2)cov++;S.cov=Math.min(1,cov/S.reach);
+ if(S.found.size===S.surv.length){S.done=true;log('✅ All survivors located')}
+ else if(S.tick>=TMAX||!A.length){S.done=true;log('⏱ Mission ended')}
+}
+function draw(){
+ const st=getComputedStyle(document.documentElement),col=n=>st.getPropertyValue(n).trim(),v=$('view').value;
+ const src=v==='truth'?null:v==='swarm'?S.union:S.drones[+v]?.belief;
+ for(let c=0;c<N;c++){const x=c%W,y=c/W|0;let f;
+  if(!src)f=S.w[c]?'--obs':'--free';else f=src[c]<0?'--fog':src[c]===1?'--obs':'--free';
+  cx.fillStyle=col(f);cx.fillRect(x*C,(W-1-y)*C,C,C)}
+ if($('oph').checked){let m=0;for(const d of S.drones)for(let c=0;c<N;c++){const p=d.pher[c];if(p>.08){cx.fillStyle=`rgba(255,170,0,${Math.min(.55,p*.18)})`;cx.fillRect((c%W)*C,(W-1-(c/W|0))*C,C,C)}}}
+ const pt=(x,y)=>[x*C+C/2,(W-1-y)*C+C/2];
+ for(const s of S.surv){const f=S.found.has(s);if(!f&&v!=='truth')continue;const[x,y]=pt(s%W,s/W|0);cx.beginPath();cx.arc(x,y,f?5:4,0,7);if(f){cx.fillStyle=col('--ok');cx.fill()}else{cx.strokeStyle=col('--bad');cx.lineWidth=2;cx.stroke()}}
+ const A=S.drones.filter(d=>d.alive);
+ if($('olk').checked&&!S.black){cx.strokeStyle='rgba(61,220,151,.55)';cx.lineWidth=1;for(let i=0;i<A.length;i++)for(let j=i+1;j<A.length;j++)if(Math.abs(A[i].x-A[j].x)+Math.abs(A[i].y-A[j].y)<=CR){const a=pt(A[i].x,A[i].y),b=pt(A[j].x,A[j].y);cx.beginPath();cx.moveTo(...a);cx.lineTo(...b);cx.stroke()}}
+ if($('opa').checked)for(const d of A){if(!d.path.length)continue;cx.strokeStyle=`hsla(${d.id*47%360},80%,55%,.7)`;cx.lineWidth=1.5;cx.beginPath();cx.moveTo(...pt(d.x,d.y));for(const p of d.path.slice(0,25))cx.lineTo(...pt(p%W,p/W|0));cx.stroke()}
+ cx.textAlign='center';cx.textBaseline='middle';
+ for(const d of S.drones){const[x,y]=pt(d.x,d.y);
+  if(!d.alive){cx.fillStyle='rgba(214,69,69,.85)';cx.font='bold 14px sans-serif';cx.fillText('✕',x,y);continue}
+  cx.beginPath();cx.arc(x,y,6.5,0,7);cx.fillStyle=`hsl(${d.id*47%360},75%,45%)`;cx.fill();cx.strokeStyle='#fff';cx.lineWidth=1.5;cx.stroke();cx.fillStyle='#fff';cx.font='bold 9px sans-serif';cx.fillText(d.id,x,y+.5)}
+ if(S.black){cx.fillStyle='rgba(214,69,69,.85)';cx.font='bold 13px sans-serif';cx.textAlign='left';cx.fillText('📡 COMM BLACKOUT '+S.black,8,14)}
+}
+function ui(){
+ if(S.tick===lastT&&!S.done)return;lastT=S.tick;
+ const al=S.drones.filter(d=>d.alive).length,red=S.moves?1-S.vis.size/S.moves:0;
+ const s=[['Survivors',`${S.found.size}/${S.surv.length}`],['Coverage',(S.cov*100).toFixed(0)+'%'],['Active UAVs',`${al}/${S.drones.length}`],['Tick',`${S.tick}/${TMAX}`],['Energy used',S.energy],['Redundancy',(red*100).toFixed(0)+'%'],['Yields',S.yields],['Collisions',S.coll]];
+ $('stats').innerHTML=s.map(a=>`<div class="stat"><small>${a[0]}</small><b>${a[1]}</b></div>`).join('');
+ $('banner').textContent=S.done?(S.found.size===S.surv.length?`✅ All ${S.surv.length} survivors found at tick ${S.tick} · ${(S.cov*100).toFixed(0)}% mapped`:`⏱ Ended: ${S.found.size}/${S.surv.length} survivors found`):(run?'🔎 Searching…':'⏸ Paused');
+ $('log').innerHTML=S.log.map(l=>`<li>${l}</li>`).join('');
+}
+function loop(ts){const dt=Math.min(.1,(ts-(loop.l||ts))/1e3);loop.l=ts;if(run&&!S.done){acc+=dt*P.speed;while(acc>=1&&!S.done){acc--;step()}}
+ $('play').textContent=run&&!S.done?'⏸ Pause':'▶ Start';draw();ui();requestAnimationFrame(loop)}
+function restart(){init();step0()}function step0(){S.union.fill(-1);S.drones.forEach(sense);draw();lastT=-1}
+const bind=(id,k,lab)=>{$(id).oninput=e=>{P[k]=+e.target.value;if(lab)$(lab).textContent=P[k];if(['n','k','seed'].includes(k))restart()}};
+bind('n','n','vn');bind('k','k','vk');bind('seed','seed');bind('speed','speed','vs');bind('wc','wc');bind('wp','wp');
+$('vn').textContent=P.n;$('vk').textContent=P.k;$('vs').textContent=P.speed;
+$('play').onclick=()=>{if(S.done){restart();run=true}else run=!run;lastT=-1};
+$('stepb').onclick=()=>{run=false;step();lastT=-1};$('reset').onclick=()=>{restart();run=true};
+$('dice').onclick=()=>{P.seed=Math.floor(Math.random()*9999);$('seed').value=P.seed;restart()};
+$('bk').onclick=()=>{killRandom();lastT=-1};$('bb').onclick=()=>{blackout();lastT=-1};$('bc').onclick=()=>{collapse();lastT=-1};
+cv.onclick=e=>{const r=cv.getBoundingClientRect(),x=(e.clientX-r.left)/r.width*W,y=W-(e.clientY-r.top)/r.height*W;let b=null,bd=2.5;
+ for(const d of S.drones){if(!d.alive)continue;const q=Math.hypot(d.x+.5-x,d.y+.5-y);if(q<bd){bd=q;b=d}}if(b&&S.drones.filter(d=>d.alive).length>1){killOne(b);lastT=-1}};
+document.addEventListener('keydown',e=>{if(e.code==='Space'&&!/INPUT|SELECT|BUTTON/.test(e.target.tagName)){e.preventDefault();$('play').click()}});
+init();step0();requestAnimationFrame(loop);
+</script></body></html>
